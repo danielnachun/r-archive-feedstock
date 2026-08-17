@@ -12,10 +12,10 @@ source:
   sha256: 544362367a9ec182572b1b3d99d70a4be17c37924328b217e787d625f2462a45
   patches:
     - 0001-minimal-UCRT-libs.patch
+    - 0002-rename-shared-library-to-avoid-dll-clash.patch
 
 build:
-  skip: True  # [win]
-  number: 1
+  number: 2
   rpaths:
     - lib/R/lib/
     - lib/

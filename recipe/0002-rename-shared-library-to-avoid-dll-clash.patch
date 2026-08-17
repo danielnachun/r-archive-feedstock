@@ -1,0 +1,94 @@
+From f01ec67f104ceffb713eb08807a27e87f17220a2 Mon Sep 17 00:00:00 2001
+From: Daniel Nachun <daniel.nachun@gmail.com>
+Date: Mon, 17 Aug 2026 12:48:22 -0700
+Subject: [PATCH] rename package shared library to Rarchive to avoid
+ archive.dll clash on Windows
+
+On Windows the conda-forge 'libarchive' package ships its runtime library as
+Library/bin/archive.dll.  R installs this package's own compiled library as
+archive.dll too, and loads it with useDynLib(archive).  When the loader then
+resolves this DLL's import of libarchive's archive.dll, it matches the
+already-loaded module of the same base name (this package's own DLL) instead
+of libarchive, so libarchive symbols are not found and loading the namespace
+fails.
+
+Install the package library as Rarchive.<ext> instead (via src/install.libs.R),
+and rename the registration entry point to R_init_Rarchive and the useDynLib
+directive to match, so the base name no longer collides with libarchive while
+the package keeps linking against the external shared libarchive.
+---
+ NAMESPACE          |  2 +-
+ R/archive.R        |  2 +-
+ src/cpp11.cpp      |  2 +-
+ src/install.libs.R | 25 +++++++++++++++++++++++++
+ 4 files changed, 28 insertions(+), 3 deletions(-)
+ create mode 100644 src/install.libs.R
+
+diff --git a/NAMESPACE b/NAMESPACE
+index 1db0c4f..f9cc790 100644
+--- a/NAMESPACE
++++ b/NAMESPACE
+@@ -15,4 +15,4 @@ importFrom(glue,single_quote)
+ importFrom(rlang,is_character)
+ importFrom(rlang,is_named)
+ importFrom(tibble,as_tibble)
+-useDynLib(archive, .registration = TRUE)
++useDynLib(Rarchive, .registration = TRUE)
+diff --git a/R/archive.R b/R/archive.R
+index 4752ad6..22f71e0 100644
+--- a/R/archive.R
++++ b/R/archive.R
+@@ -1,5 +1,5 @@
+ ## usethis namespace: start
+-#' @useDynLib archive, .registration = TRUE
++#' @useDynLib Rarchive, .registration = TRUE
+ #' @importFrom tibble as_tibble
+ #' @importFrom cli cli_progress_bar
+ ## usethis namespace: end
+diff --git a/src/cpp11.cpp b/src/cpp11.cpp
+index dd4bbbb..4221323 100644
+--- a/src/cpp11.cpp
++++ b/src/cpp11.cpp
+@@ -133,7 +133,7 @@ static const R_CallMethodDef CallEntries[] = {
+ };
+ }
+ 
+-extern "C" attribute_visible void R_init_archive(DllInfo* dll){
++extern "C" attribute_visible void R_init_Rarchive(DllInfo* dll){
+   R_registerRoutines(dll, NULL, CallEntries, NULL, NULL);
+   R_useDynamicSymbols(dll, FALSE);
+   R_forceSymbols(dll, TRUE);
+diff --git a/src/install.libs.R b/src/install.libs.R
+new file mode 100644
+index 0000000..b5dc27e
+--- /dev/null
++++ b/src/install.libs.R
+@@ -0,0 +1,25 @@
++# Install the compiled package library under the name "Rarchive" instead of
++# "archive".  On Windows the system libarchive is shipped as "archive.dll", so a
++# package library also called "archive.dll" collides with it at load time: the
++# loader resolves this package's dependency on libarchive's "archive.dll" to the
++# already-loaded package DLL of the same base name, and symbol resolution fails.
++# Renaming our own library avoids the clash.  The matching name is used by
++# `useDynLib(Rarchive, .registration = TRUE)` and `R_init_Rarchive()`.
++#
++# This mirrors the default logic in tools:::.install_packages() (glob the built
++# shared objects and copy them into libs[/arch]), only renaming the main one.
++
++files <- Sys.glob(paste0("*", SHLIB_EXT))
++
++dest <- file.path(R_PACKAGE_DIR, paste0("libs", R_ARCH))
++dir.create(dest, recursive = TRUE, showWarnings = FALSE)
++
++main <- paste0(R_PACKAGE_NAME, SHLIB_EXT)          # e.g. archive.dll / archive.so
++for (f in files) {
++  target <- if (identical(f, main)) paste0("R", main) else f
++  file.copy(f, file.path(dest, target), overwrite = TRUE)
++}
++
++if (file.exists("symbols.rds")) {
++  file.copy("symbols.rds", dest, overwrite = TRUE)
++}
+-- 
+2.53.0
+
